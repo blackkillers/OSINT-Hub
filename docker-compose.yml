@@ -115,13 +115,13 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: http://${VPS_IP:-localhost}:8000
-        NEXT_PUBLIC_WS_URL: ws://${VPS_IP:-localhost}:8000
+        NEXT_PUBLIC_API_URL: http://173.212.255.158:8000
+        NEXT_PUBLIC_WS_URL: ws://173.212.255.158:8000
     container_name: osint_frontend
     restart: unless-stopped
     environment:
-      - NEXT_PUBLIC_API_URL=http://${VPS_IP:-localhost}:8000
-      - NEXT_PUBLIC_WS_URL=ws://${VPS_IP:-localhost}:8000
+      - NEXT_PUBLIC_API_URL=http://173.212.255.158:8000
+      - NEXT_PUBLIC_WS_URL=ws://173.212.255.158:8000
     depends_on:
       - backend
     ports:
