@@ -67,11 +67,39 @@ manager = ConnectionManager()
 def get_applicable_modules(target_type: TargetTypeEnum) -> List[str]:
     """Returns list of active OSINT module names matching the target type."""
     mapping = {
-        TargetTypeEnum.EMAIL: ["email_holehe", "email_mosint", "email_ghunt", "darkweb_onionsearch", "leak_daprofiler"],
-        TargetTypeEnum.USERNAME: ["username_maigret", "username_sherlock", "username_tookie", "darkweb_onionsearch"],
-        TargetTypeEnum.PHONE: ["phone_phoneinfoga", "phone_toutatis"],
-        TargetTypeEnum.IP: ["geoint_shodan", "geoint_censys", "geoint_shadowbroker"],
-        TargetTypeEnum.DOMAIN: ["geoint_shodan", "geoint_censys", "darkweb_onionsearch"],
+        TargetTypeEnum.EMAIL: [
+            "email_holehe",
+            "email_mosint",
+            "email_ghunt",
+            "email_epieos",
+            "darkweb_onionsearch",
+            "leak_daprofiler",
+        ],
+        TargetTypeEnum.USERNAME: [
+            "username_whatsmyname",
+            "username_maigret",
+            "username_sherlock",
+            "username_tookie",
+            "darkweb_onionsearch",
+        ],
+        TargetTypeEnum.PHONE: [
+            "phone_phoneinfoga",
+            "phone_toutatis",
+            "phone_epieos",
+        ],
+        TargetTypeEnum.IP: [
+            "geoint_shodan",
+            "geoint_censys",
+            "geoint_shadowbroker",
+            "geoint_overpass",
+        ],
+        TargetTypeEnum.DOMAIN: [
+            "domain_builtwith",
+            "domain_osintsh",
+            "geoint_shodan",
+            "geoint_censys",
+            "darkweb_onionsearch",
+        ],
     }
     return mapping.get(target_type, ["email_holehe"])
 

@@ -138,7 +138,7 @@ OSINT-Hub is pre-configured for one-click deployment on self-hosted PaaS platfor
 OSINT-Hub is free, open-source software built for the security community. If this tool helped your investigations or saved you time, consider supporting further development:
 
 <p align="center">
-  <a href="https://www.buymeacoffee.com/yourhandle" target="_blank">
+  <a href="https://buymeacoffee.com/studioengine" target="_blank">
     <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" width="200">
   </a>
 </p>
