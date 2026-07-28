@@ -1,22 +1,78 @@
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /app
 
+# ─────────────────────────────────────────────
+# System dependencies + Go (for OSINT tools)
+# ─────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    wget \
     git \
     netcat-openbsd \
     libpq-dev \
+    tor \
+    python3-dev \
+    libffi-dev \
+    libssl-dev \
+    jq \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
+# ─────────────────────────────────────────────
+# Python OSINT tools via pip
+# ─────────────────────────────────────────────
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+# ─────────────────────────────────────────────
+# PhoneInfoga (binary from GitHub releases)
+# ─────────────────────────────────────────────
+RUN PHONEINFOGA_VERSION=$(curl -s https://api.github.com/repos/sundowndev/phoneinfoga/releases/latest | jq -r '.tag_name') \
+    && curl -sSL "https://github.com/sundowndev/phoneinfoga/releases/download/${PHONEINFOGA_VERSION}/phoneinfoga_Linux_x86_64.tar.gz" \
+    -o /tmp/phoneinfoga.tar.gz \
+    && tar -xzf /tmp/phoneinfoga.tar.gz -C /usr/local/bin phoneinfoga \
+    && chmod +x /usr/local/bin/phoneinfoga \
+    && rm /tmp/phoneinfoga.tar.gz \
+    || echo "PhoneInfoga download failed - will use stub"
+
+# ─────────────────────────────────────────────
+# WhatsMyName (Python script + data)
+# ─────────────────────────────────────────────
+RUN git clone --depth 1 https://github.com/WebBreacher/WhatsMyName.git /opt/whatsmyname \
+    && pip install --no-cache-dir -r /opt/whatsmyname/requirements.txt 2>/dev/null || true \
+    && ln -sf /opt/whatsmyname/whats_my_name.py /usr/local/bin/whatsmyname \
+    && chmod +x /usr/local/bin/whatsmyname \
+    || echo "WhatsMyName install failed - will use stub"
+
+# ─────────────────────────────────────────────
+# Tookie-OSINT
+# ─────────────────────────────────────────────
+RUN git clone --depth 1 https://github.com/alfredredbird/tookie-osint.git /opt/tookie \
+    && pip install --no-cache-dir -r /opt/tookie/requirements.txt 2>/dev/null || true \
+    || echo "Tookie install failed - will use stub"
+
+# ─────────────────────────────────────────────
+# DaProfiler
+# ─────────────────────────────────────────────
+RUN git clone --depth 1 https://github.com/dalunacrobate/DaProfiler.git /opt/daprofiler \
+    && pip install --no-cache-dir -r /opt/daprofiler/requirements.txt 2>/dev/null || true \
+    || echo "DaProfiler install failed - will use stub"
+
+# ─────────────────────────────────────────────
+# GHunt (pip package)
+# ─────────────────────────────────────────────
+RUN pip install --no-cache-dir ghunt 2>/dev/null || echo "GHunt install failed - will use stub"
+
+# ─────────────────────────────────────────────
+# Copy application code
+# ─────────────────────────────────────────────
+COPY . /app
 
 EXPOSE 8000
 

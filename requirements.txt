@@ -1,12 +1,38 @@
+# ── Core FastAPI stack ──────────────────────────────────────────────────────
 fastapi==0.110.0
 uvicorn[standard]==0.27.1
 pydantic==2.6.1
 pydantic-settings==2.2.1
+python-dotenv==1.0.1
+
+# ── Async & Queue ───────────────────────────────────────────────────────────
 celery[redis]==5.3.6
 redis==5.0.1
+
+# ── Database ────────────────────────────────────────────────────────────────
 asyncpg==0.29.0
 sqlalchemy==2.0.27
+
+# ── Logging ─────────────────────────────────────────────────────────────────
 structlog==24.1.0
-httpx==0.26.0
+
+# ── HTTP Clients (with SOCKS5 / Tor support) ────────────────────────────────
+httpx[socks]==0.26.0
+requests[socks]==2.31.0
 socksio==1.0.0
-python-dotenv==1.0.1
+aiohttp==3.9.3
+
+# ── OSINT Python Tools ───────────────────────────────────────────────────────
+holehe==1.64
+maigret==0.4.4
+sherlock-project==0.14.3
+onionsearch==1.0.8
+phonenumbers==8.13.30
+
+# ── OSINT APIs (optional - needs API keys in .env) ──────────────────────────
+shodan==1.31.0
+censys==2.2.9
+
+# ── Data processing ──────────────────────────────────────────────────────────
+beautifulsoup4==4.12.3
+lxml==5.1.0
