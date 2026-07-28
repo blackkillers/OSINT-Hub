@@ -5,7 +5,6 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Install system utilities and OSINT CLI tool prerequisites
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
@@ -14,22 +13,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python packages for Backend gateway & OSINT engines
-RUN pip install --no-cache-dir \
-    fastapi \
-    uvicorn[standard] \
-    pydantic \
-    pydantic-settings \
-    celery \
-    redis \
-    asyncpg \
-    sqlalchemy \
-    structlog \
-    httpx \
-    socksio \
-    holehe
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . /app
+COPY . .
 
 EXPOSE 8000
 

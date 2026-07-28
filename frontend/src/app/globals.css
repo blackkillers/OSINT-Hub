@@ -1,0 +1,95 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --brand-cyan: #00d4ff;
+  --brand-green: #00ff88;
+  --brand-dark: #0a0e1a;
+  --brand-surface: #0f1629;
+  --brand-border: #1e2d4a;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  background-color: #0a0e1a;
+  color: #e2e8f0;
+  font-family: 'Inter', sans-serif;
+  min-height: 100vh;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0a0e1a; }
+::-webkit-scrollbar-thumb { background: #1e2d4a; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #00d4ff44; }
+
+/* Cyber grid background */
+.bg-cyber-grid {
+  background-image:
+    linear-gradient(rgba(0,212,255,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,212,255,0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Glow effects */
+.glow-cyan { box-shadow: 0 0 20px rgba(0, 212, 255, 0.3); }
+.glow-green { box-shadow: 0 0 20px rgba(0, 255, 136, 0.3); }
+.text-glow-cyan { text-shadow: 0 0 10px rgba(0, 212, 255, 0.5); }
+
+/* Node type colors for the graph */
+.node-email    { --node-color: #00d4ff; }
+.node-username { --node-color: #a78bfa; }
+.node-phone    { --node-color: #34d399; }
+.node-domain   { --node-color: #f59e0b; }
+.node-ip       { --node-color: #ef4444; }
+.node-leak     { --node-color: #f97316; }
+.node-social   { --node-color: #06b6d4; }
+.node-person   { --node-color: #00ff88; }
+
+/* Animated scan line */
+@keyframes scanline {
+  0% { transform: translateY(-100%); opacity: 0; }
+  10% { opacity: 0.5; }
+  90% { opacity: 0.5; }
+  100% { transform: translateY(100vh); opacity: 0; }
+}
+
+/* Status badge pulse */
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.status-running {
+  animation: status-pulse 1.5s ease-in-out infinite;
+}
+
+/* Graph node animations */
+.react-flow__node { transition: all 0.2s ease; }
+.react-flow__node:hover { filter: brightness(1.2); }
+
+/* Module card hover */
+.module-card {
+  transition: all 0.2s ease;
+  border: 1px solid #1e2d4a;
+}
+.module-card:hover {
+  border-color: #00d4ff44;
+  box-shadow: 0 0 20px rgba(0,212,255,0.1);
+  transform: translateY(-1px);
+}
+
+/* Terminal style text */
+.terminal-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  color: #00d4ff;
+}
