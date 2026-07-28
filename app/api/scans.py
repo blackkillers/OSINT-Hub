@@ -1,14 +1,15 @@
 """
-OSINT-Hub Scans API & WebSocket Router
-======================================
-Endpoints for creating investigations, polling scan status, retrieving Graph-Ready data,
-and broadcasting real-time module updates over WebSocket.
+OSINT-Hub Scans API & WebSocket Router - COMPLETE REWRITE
+==========================================================
+Full pipeline: create scan → Celery dispatch → poll Celery results → aggregate graph → WebSocket push.
 """
 
 import asyncio
-from typing import Dict, List
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
+from celery.result import AsyncResult
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
 import structlog
 
@@ -24,48 +25,38 @@ from app.schemas import (
 )
 
 logger = structlog.get_logger(__name__)
-
 router = APIRouter()
 
-# In-memory storage for active scan results (Backed by PostgreSQL in production script)
-SCANS_DB: Dict[str, Dict] = {}
+# In-memory scan store: scan_id -> scan metadata + list of Celery task IDs
+SCANS_DB: Dict[str, Dict[str, Any]] = {}
 
 
 class ConnectionManager:
-    """Manages WebSocket connections for real-time investigation graph updates."""
-
     def __init__(self):
         self.active_connections: Dict[str, List[WebSocket]] = {}
 
     async def connect(self, scan_id: str, websocket: WebSocket):
         await websocket.accept()
-        if scan_id not in self.active_connections:
-            self.active_connections[scan_id] = []
-        self.active_connections[scan_id].append(websocket)
-        logger.info("WebSocket client connected", scan_id=scan_id)
+        self.active_connections.setdefault(scan_id, []).append(websocket)
 
     def disconnect(self, scan_id: str, websocket: WebSocket):
         if scan_id in self.active_connections:
-            if websocket in self.active_connections[scan_id]:
-                self.active_connections[scan_id].remove(websocket)
-            if not self.active_connections[scan_id]:
-                del self.active_connections[scan_id]
-        logger.info("WebSocket client disconnected", scan_id=scan_id)
+            self.active_connections[scan_id] = [
+                ws for ws in self.active_connections[scan_id] if ws != websocket
+            ]
 
-    async def broadcast_update(self, scan_id: str, message: dict):
-        if scan_id in self.active_connections:
-            for connection in self.active_connections[scan_id]:
-                try:
-                    await connection.send_json(message)
-                except Exception as e:
-                    logger.warning("Error broadcasting WebSocket message", error=str(e))
+    async def broadcast(self, scan_id: str, message: dict):
+        for ws in self.active_connections.get(scan_id, []):
+            try:
+                await ws.send_json(message)
+            except Exception:
+                pass
 
 
 manager = ConnectionManager()
 
 
 def get_applicable_modules(target_type: TargetTypeEnum) -> List[str]:
-    """Returns list of active OSINT module names matching the target type."""
     mapping = {
         TargetTypeEnum.EMAIL: [
             "email_holehe",
@@ -80,36 +71,81 @@ def get_applicable_modules(target_type: TargetTypeEnum) -> List[str]:
             "username_maigret",
             "username_sherlock",
             "username_tookie",
-            "darkweb_onionsearch",
         ],
         TargetTypeEnum.PHONE: [
             "phone_phoneinfoga",
             "phone_toutatis",
-            "phone_epieos",
         ],
         TargetTypeEnum.IP: [
             "geoint_shodan",
             "geoint_censys",
-            "geoint_shadowbroker",
-            "geoint_overpass",
         ],
         TargetTypeEnum.DOMAIN: [
             "domain_builtwith",
             "domain_osintsh",
             "geoint_shodan",
             "geoint_censys",
-            "darkweb_onionsearch",
         ],
     }
     return mapping.get(target_type, ["email_holehe"])
 
 
+def _collect_celery_results(scan_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Poll all Celery task IDs for a scan and collect completed results.
+    Merges new nodes/edges into the scan store.
+    """
+    from app.worker import celery_app
+
+    completed_results: List[Dict] = []
+    all_nodes: Dict[str, dict] = {n["id"]: n for n in scan_data.get("nodes", [])}
+    all_edges: List[dict] = list(scan_data.get("edges", []))
+    tasks_done = 0
+
+    for task_id in scan_data.get("task_ids", []):
+        result = AsyncResult(task_id, app=celery_app)
+        if result.ready():
+            tasks_done += 1
+            try:
+                module_result = result.get(timeout=1)
+                if isinstance(module_result, dict):
+                    completed_results.append(module_result)
+                    # Merge nodes (deduplicate by id)
+                    for node in module_result.get("nodes", []):
+                        if node["id"] not in all_nodes:
+                            all_nodes[node["id"]] = node
+                    # Merge edges (deduplicate by source+target+relation)
+                    existing_edge_keys = {
+                        f"{e['source']}-{e['target']}-{e['relation']}" for e in all_edges
+                    }
+                    for edge in module_result.get("edges", []):
+                        key = f"{edge['source']}-{edge['target']}-{edge['relation']}"
+                        if key not in existing_edge_keys:
+                            all_edges.append(edge)
+                            existing_edge_keys.add(key)
+            except Exception as e:
+                logger.warning("Failed to collect Celery result", task_id=task_id, error=str(e))
+
+    total_tasks = len(scan_data.get("task_ids", []))
+    overall_status = (
+        StatusEnum.RUNNING.value if tasks_done < total_tasks else StatusEnum.SUCCESS.value
+    )
+
+    # Update scan_data in place
+    scan_data["nodes"] = list(all_nodes.values())
+    scan_data["edges"] = all_edges
+    scan_data["results"] = completed_results
+    scan_data["modules_completed"] = tasks_done
+    scan_data["status"] = overall_status
+
+    return scan_data
+
+
 @router.post("/scans", response_model=Dict[str, str], status_code=status.HTTP_201_CREATED)
 async def create_scan(payload: ScanRequest):
-    """
-    Triggers a new multi-module OSINT investigation.
-    Enqueues Celery tasks for each applicable module and returns scan_id.
-    """
+    """Triggers a new multi-module OSINT investigation."""
+    from app.worker import run_module_task
+
     scan_id = uuid4()
     scan_id_str = str(scan_id)
 
@@ -117,55 +153,71 @@ async def create_scan(payload: ScanRequest):
     if "all" in modules_to_run or not modules_to_run:
         modules_to_run = get_applicable_modules(payload.target_type)
 
-    logger.info("Creating new OSINT scan", scan_id=scan_id_str, target=payload.target, modules=modules_to_run)
+    logger.info(
+        "Creating new scan",
+        scan_id=scan_id_str,
+        target=payload.target,
+        modules=modules_to_run,
+    )
 
-    # Initialize Scan Entry
-    SCANS_DB[scan_id_str] = {
-        "scan_id": scan_id_str,
-        "target": payload.target,
-        "target_type": payload.target_type,
-        "status": StatusEnum.RUNNING.value,
-        "modules_total": len(modules_to_run),
-        "modules_completed": 0,
-        "results": [],
-        "nodes": [
-            {
-                "id": f"target:{payload.target}",
-                "label": payload.target,
-                "type": NodeTypeEnum.PERSON.value if payload.target_type == TargetTypeEnum.USERNAME else payload.target_type.value,
-                "metadata": {"is_root": True},
-            }
-        ],
-        "edges": [],
-    }
+    # Root node for the target
+    root_node_type = (
+        NodeTypeEnum.PERSON.value
+        if payload.target_type == TargetTypeEnum.USERNAME
+        else payload.target_type.value
+    )
 
-    # Dispatch tasks to Celery asynchronous queue
-    from app.worker import run_module_task
-
+    # Dispatch all tasks and collect task IDs
+    task_ids = []
     for module_name in modules_to_run:
-        run_module_task.delay(
+        task = run_module_task.delay(
             scan_id_str=scan_id_str,
             target=payload.target,
             target_type_str=payload.target_type.value,
             module_name=module_name,
         )
+        task_ids.append(task.id)
+
+    SCANS_DB[scan_id_str] = {
+        "scan_id": scan_id_str,
+        "target": payload.target,
+        "target_type": payload.target_type.value,
+        "status": StatusEnum.RUNNING.value,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "modules_total": len(modules_to_run),
+        "modules_completed": 0,
+        "task_ids": task_ids,
+        "results": [],
+        "nodes": [
+            {
+                "id": f"target:{payload.target}",
+                "label": payload.target,
+                "type": root_node_type,
+                "metadata": {"is_root": True},
+            }
+        ],
+        "edges": [],
+        "ai_summary": None,
+    }
 
     return {"scan_id": scan_id_str, "status": "scan_initiated"}
 
 
 @router.get("/scans/{scan_id}", response_model=AggregateScanResponse)
 async def get_scan_results(scan_id: str):
-    """Retrieves current aggregate results, graph nodes, and edges for a scan."""
+    """Polls Celery tasks, aggregates results, and returns the current graph state."""
     if scan_id not in SCANS_DB:
         raise HTTPException(status_code=404, detail="Scan ID not found")
 
-    scan_data = SCANS_DB[scan_id]
+    scan_data = _collect_celery_results(SCANS_DB[scan_id])
+    SCANS_DB[scan_id] = scan_data
+
     return AggregateScanResponse(
         scan_id=UUID(scan_data["scan_id"]),
         target=scan_data["target"],
         target_type=TargetTypeEnum(scan_data["target_type"]),
         overall_status=StatusEnum(scan_data["status"]),
-        created_at="2026-07-28T11:45:00Z",
+        created_at=scan_data["created_at"],
         completed_modules_count=scan_data["modules_completed"],
         total_modules_count=scan_data["modules_total"],
         nodes=[NodeModel(**n) for n in scan_data["nodes"]],
@@ -177,11 +229,10 @@ async def get_scan_results(scan_id: str):
 
 @router.websocket("/ws/scans/{scan_id}")
 async def scan_websocket(websocket: WebSocket, scan_id: str):
-    """WebSocket endpoint for real-time investigation progress streaming."""
+    """WebSocket for real-time push of graph updates as modules complete."""
     await manager.connect(scan_id, websocket)
     try:
         while True:
-            # Keepalive / listen for client ping messages
             await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(scan_id, websocket)
