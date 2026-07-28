@@ -104,7 +104,7 @@ services:
         condition: service_healthy
     # Bound exclusively to 127.0.0.1 (Loopback) for local reverse proxy / Tailscale access
     ports:
-      - "127.0.0.1:8000:8000"
+      - "0.0.0.0:8000:8000"
     networks:
       - osint_internal_network
 
@@ -155,7 +155,7 @@ services:
       - backend
     # Bound exclusively to 127.0.0.1 (Loopback) for local reverse proxy / Tailscale access
     ports:
-      - "127.0.0.1:3000:3000"
+      - "0.0.0.0:3000:3000"
     networks:
       - osint_internal_network
 
