@@ -1,0 +1,30 @@
+# Environment variables & secrets (CRITICAL FOR PUBLIC REPO)
+.env
+.env.local
+.env.*.local
+
+# Python / Pycache
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+
+# Node / Next.js
+node_modules/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Database & Persistent storage local mounts
+postgres_data/
+redis_data/
+ollama_data/
+
+# OS / IDE / Logs
+.DS_Store
+*.log
+.vscode/
+.idea/

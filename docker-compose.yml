@@ -1,0 +1,170 @@
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------------------------
+  # Database Layer (PostgreSQL 16)
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: osint_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-osint_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-osint_secure_pass_change_me}
+      POSTGRES_DB: ${POSTGRES_DB:-osint_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init_db.sql:ro
+    # No ports exposed to host (0.0.0.0) -> Internal network access only
+    networks:
+      - osint_internal_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-osint_user} -d ${POSTGRES_DB:-osint_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Message Broker & Cache (Redis)
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: osint_redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning --requirepass ${REDIS_PASSWORD:-redis_secure_pass_change_me}
+    volumes:
+      - redis_data:/data
+    # No ports exposed to host -> Internal network access only
+    networks:
+      - osint_internal_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secure_pass_change_me}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Tor SOCKS5 Proxy Service
+  # ---------------------------------------------------------------------------
+  tor:
+    image: osminogin/tor-simple:latest
+    container_name: osint_tor_proxy
+    restart: unless-stopped
+    environment:
+      - TOR_LISTEN_PORT=9050
+    # No ports exposed to host -> accessible strictly inside osint_internal_network for Celery
+    networks:
+      - osint_internal_network
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "9050"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # Local AI Engine (Ollama)
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: osint_ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    # No ports exposed to host -> Internal network access only
+    networks:
+      - osint_internal_network
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # FastAPI Gateway Backend
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: osint_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-osint_user}:${POSTGRES_PASSWORD:-osint_secure_pass_change_me}@postgres:5432/${POSTGRES_DB:-osint_db}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_secure_pass_change_me}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-redis_secure_pass_change_me}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-redis_secure_pass_change_me}@redis:6379/1
+      - OLLAMA_HOST=http://ollama:11434
+      - TOR_SOCKS_PROXY=socks5://tor:9050
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Bound exclusively to 127.0.0.1 (Loopback) for local reverse proxy / Tailscale access
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks:
+      - osint_internal_network
+
+  # ---------------------------------------------------------------------------
+  # Celery Worker (Asynchronous Task Orchestrator)
+  # ---------------------------------------------------------------------------
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: osint_celery_worker
+    restart: unless-stopped
+    command: celery -A app.worker.celery_app worker --loglevel=info --concurrency=4
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-osint_user}:${POSTGRES_PASSWORD:-osint_secure_pass_change_me}@postgres:5432/${POSTGRES_DB:-osint_db}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_secure_pass_change_me}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-redis_secure_pass_change_me}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-redis_secure_pass_change_me}@redis:6379/1
+      - OLLAMA_HOST=http://ollama:11434
+      - TOR_SOCKS_PROXY=socks5://tor:9050
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      tor:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    networks:
+      - osint_internal_network
+
+  # ---------------------------------------------------------------------------
+  # Frontend Layer (Next.js 14+)
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: osint_frontend
+    restart: unless-stopped
+    environment:
+      - NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+      - NEXT_PUBLIC_WS_URL=ws://127.0.0.1:8000/ws
+    depends_on:
+      - backend
+    # Bound exclusively to 127.0.0.1 (Loopback) for local reverse proxy / Tailscale access
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - osint_internal_network
+
+networks:
+  osint_internal_network:
+    driver: bridge
+    internal: false # Allow outbound connections for OSINT CLI tools & APIs, but services inside don't expose host ports except 127.0.0.1
+
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_data:
