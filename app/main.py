@@ -29,10 +29,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Configure CORS - Restrict strictly for Zero Trust environments
+# Configure CORS - Allow VPS IP, localhost and Docker internal network
+ALLOW_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://173.212.255.158:3000",
+    "http://100.91.57.88:3000",  # Tailscale IP
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=ALLOW_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
